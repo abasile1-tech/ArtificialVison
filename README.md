@@ -7,10 +7,11 @@ A small, dependency-free C++20 robot simulation. It is deliberately terminal-bas
 - Generates the same 31 by 21 perfect maze on each run, making experiments reproducible.
 - Uses A* to route the robot from the top-left start to the bottom-right goal.
 - Simulates left, front, and right range readings with Gaussian measurement noise.
+- Fuses those readings into a confidence-based occupancy grid: `?` unknown, `.` free, and `#` occupied.
 - Renders a small forward-facing symbolic camera image (`#` is a wall, `.` is floor, and `G` is the goal).
 - Animates the route and robot heading in an ANSI-compatible terminal.
 
-The first version deliberately gives the A* planner the complete maze so that motion, path planning, and sensors can be verified independently. The next milestone is to build an occupancy grid only from sensor and camera measurements, then re-plan from that discovered map.
+The A* planner deliberately still receives the complete maze so that motion, mapping, and planning can be verified independently. The simulator now builds a separate occupancy grid only from sensor measurements; the next milestone is to re-plan from that discovered map.
 
 ## Build and run
 
@@ -35,7 +36,6 @@ Useful options:
 
 ## Suggested next increments
 
-1. Add an `OccupancyGrid` with unknown, free, and occupied cells.
-2. Ray-cast each range measurement into that grid and update it with confidence values.
-3. Plan only through known-free cells; use frontier exploration when the goal is unknown.
-4. Replace the symbolic camera with a raylib scene and an OpenCV image-processing pipeline.
+1. Plan only through known-free cells; use frontier exploration when the goal is unknown.
+2. Add camera-derived wall and goal observations to the occupancy grid.
+3. Replace the symbolic camera with a raylib scene and an OpenCV image-processing pipeline.

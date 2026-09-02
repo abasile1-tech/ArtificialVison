@@ -53,22 +53,64 @@ private:
 
 struct Robot { Point position{1, 1}; int heading{1}; }; // East initially.
 
+struct RangeReading {
+    double cells{};
+    bool hitWall{};
+};
+
+class OccupancyGrid {
+public:
+    OccupancyGrid() : confidence_(kWidth * kHeight, 0) {}
+
+    void markRobotCell(Point point) { update(point, -4); }
+
+    // A range beam says cells before its endpoint are free; an echo says the
+    // endpoint is occupied. Repeated observations make the belief stronger.
+    void integrateBeam(Point origin, int heading, const RangeReading& reading) {
+        constexpr int maxRange = 8;
+        const int clearCells = std::clamp(static_cast<int>(std::lround(reading.cells)), 0, maxRange);
+        for (int step = 0; step <= clearCells; ++step) {
+            update({origin.x + kDirections[heading].x * step, origin.y + kDirections[heading].y * step}, -1);
+        }
+        if (reading.hitWall && clearCells < maxRange) {
+            update({origin.x + kDirections[heading].x * (clearCells + 1), origin.y + kDirections[heading].y * (clearCells + 1)}, 3);
+        }
+    }
+
+    [[nodiscard]] char at(Point point) const {
+        if (point.x < 0 || point.x >= kWidth || point.y < 0 || point.y >= kHeight) return '#';
+        const int value = confidence_[static_cast<size_t>(point.y * kWidth + point.x)];
+        if (value >= 2) return '#';
+        if (value <= -2) return '.';
+        return '?';
+    }
+
+private:
+    void update(Point point, int amount) {
+        if (point.x < 0 || point.x >= kWidth || point.y < 0 || point.y >= kHeight) return;
+        int& value = confidence_[static_cast<size_t>(point.y * kWidth + point.x)];
+        value = std::clamp(value + amount, -8, 8);
+    }
+    std::vector<int> confidence_;
+};
+
 class SensorSuite {
 public:
     explicit SensorSuite(const Maze& maze) : maze_(maze) {}
-    [[nodiscard]] std::array<double, 3> scan(const Robot& robot) {
+    [[nodiscard]] std::array<RangeReading, 3> scan(const Robot& robot) {
         return {range(robot.position, (robot.heading + 3) % 4), range(robot.position, robot.heading), range(robot.position, (robot.heading + 1) % 4)};
     }
 private:
-    [[nodiscard]] double range(Point origin, int heading) {
+    [[nodiscard]] RangeReading range(Point origin, int heading) {
         constexpr int maxRange = 8;
         int distance = 0;
+        bool hitWall = false;
         for (int step = 1; step <= maxRange; ++step) {
             Point probe{origin.x + kDirections[heading].x * step, origin.y + kDirections[heading].y * step};
-            if (maze_.isWall(probe)) { distance = step - 1; break; }
+            if (maze_.isWall(probe)) { distance = step - 1; hitWall = true; break; }
             distance = step;
         }
-        return std::max(0.0, distance + noise_(rng_));
+        return {std::max(0.0, distance + noise_(rng_)), hitWall};
     }
     const Maze& maze_;
     std::mt19937 rng_{7};
@@ -115,9 +157,11 @@ private:
     return maze.isWall(view) ? '#' : '.';
 }
 
-void render(const Maze& maze, const Robot& robot, Point goal, const std::vector<Point>& route, const std::array<double, 3>& readings, int frame) {
+void render(const Maze& maze, const OccupancyGrid& discovered, const Robot& robot, Point goal,
+            const std::vector<Point>& route, const std::array<RangeReading, 3>& readings, int frame) {
     std::cout << "\x1B[2J\x1B[H"; // Clear an ANSI-compatible terminal.
     std::cout << "Artificial Vision Maze Robot | frame " << frame << " | goal: " << goal.x << ',' << goal.y << "\n\n";
+    std::cout << "Ground truth maze" << std::string(kWidth - 18, ' ') << "  Discovered occupancy map\n";
     for (int y = 0; y < kHeight; ++y) {
         for (int x = 0; x < kWidth; ++x) {
             Point p{x, y}; char pixel = maze.at(p);
@@ -126,15 +170,22 @@ void render(const Maze& maze, const Robot& robot, Point goal, const std::vector<
             if (p == robot.position) pixel = ">v<^"[robot.heading];
             std::cout << pixel;
         }
+        std::cout << "  ";
+        for (int x = 0; x < kWidth; ++x) {
+            Point p{x, y};
+            char pixel = discovered.at(p);
+            if (p == robot.position) pixel = ">v<^"[robot.heading];
+            std::cout << pixel;
+        }
         std::cout << '\n';
     }
-    std::cout << "\nNoisy range sensors (cells): left " << readings[0] << " | front " << readings[1] << " | right " << readings[2] << "\n";
+    std::cout << "\nNoisy range sensors (cells): left " << readings[0].cells << " | front " << readings[1].cells << " | right " << readings[2].cells << "\n";
     std::cout << "Forward camera (# wall, . floor, G goal):\n";
     for (int forward = 5; forward >= 1; --forward) {
         for (int side = -3; side <= 3; ++side) std::cout << cameraPixel(maze, robot, forward, side, goal);
         std::cout << '\n';
     }
-    std::cout << "\nLegend: # wall, + A* route, >v<^ robot heading, G goal. Ctrl+C exits.\n";
+    std::cout << "\nLegend: # wall, + A* route, >v<^ robot heading, G goal, ? unknown map cell. Ctrl+C exits.\n";
 }
 
 [[nodiscard]] int optionValue(int argc, char* argv[], const std::string& option, int fallback) {
@@ -150,11 +201,15 @@ int main(int argc, char* argv[]) {
     Maze maze; Robot robot; Point goal{kWidth - 2, kHeight - 2};
     std::vector<Point> path = findPath(maze, robot.position, goal);
     SensorSuite sensors(maze);
+    OccupancyGrid discovered;
     if (path.empty()) { std::cerr << "No route to the goal.\n"; return 1; }
     size_t pathIndex = 0;
     for (int frame = 0; frame < requestedSteps; ++frame) {
         auto readings = sensors.scan(robot);
-        render(maze, robot, goal, {path.begin() + static_cast<std::ptrdiff_t>(pathIndex), path.end()}, readings, frame);
+        discovered.markRobotCell(robot.position);
+        const std::array<int, 3> sensorHeadings{(robot.heading + 3) % 4, robot.heading, (robot.heading + 1) % 4};
+        for (size_t i = 0; i < readings.size(); ++i) discovered.integrateBeam(robot.position, sensorHeadings[i], readings[i]);
+        render(maze, discovered, robot, goal, {path.begin() + static_cast<std::ptrdiff_t>(pathIndex), path.end()}, readings, frame);
         if (robot.position == goal) { std::cout << "Goal reached after " << frame << " motion steps.\n"; return 0; }
         Point next = path[++pathIndex];
         for (int heading = 0; heading < 4; ++heading) if (robot.position.x + kDirections[heading].x == next.x && robot.position.y + kDirections[heading].y == next.y) robot.heading = heading;
