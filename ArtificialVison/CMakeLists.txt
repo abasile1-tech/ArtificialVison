@@ -12,7 +12,7 @@ endif()
 target_compile_features(ArtificialVison PRIVATE cxx_std_20)
 
 if (MSVC)
-  target_compile_options(ArtificialVison PRIVATE /W4 /permissive-)
+  target_compile_options(ArtificialVison PRIVATE /permissive-)
 else()
   target_compile_options(ArtificialVison PRIVATE -Wall -Wextra -Wpedantic)
 endif()
