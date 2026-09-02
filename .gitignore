@@ -361,3 +361,64 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# SCons
+.sconsign
+.sconsign.*
+.sconsign.dblite
+.sconf_temp/
+
+# CMake & build folders
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeCompileCommands.json
+CTestTestfile.cmake
+build/
+build-*/
+cmake-build*/
+
+# Ninja
+.ninja_log
+.ninja_deps
+
+# Godot
+.import/
+*.import
+.godot/
+export_presets.cfg
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.lo
+*.la
+*.dll
+*.exe
+*.so
+*.dylib
+*.lib
+*.a
+*.pdb
+*.ilk
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Misc
+*.log
+
+# Cross-platform OS files
+.DS_Store
+Thumbs.db
+
+# IDE/editor directories
+.idea/
+*.code-workspace
+.vscode/
+
+# Vendorized SCons (ignore if you don't want to commit vendored SCons sources)
+tools/python/SCons/
